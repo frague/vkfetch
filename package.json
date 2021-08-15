@@ -1,0 +1,22 @@
+{
+  "name": "vk_fetch",
+  "version": "1.0.0",
+  "description": "Fetches mp3 streams from vk.com",
+  "main": "fetch_stream.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/frague/vkfetch.git"
+  },
+  "author": "Nick Bogdanov",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/frague/vkfetch/issues"
+  },
+  "homepage": "https://github.com/frague/vkfetch#readme",
+  "dependencies": {
+    "prompt": "^1.1.0"
+  }
+}

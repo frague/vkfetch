@@ -1,9 +1,23 @@
 #!/usr/bin/env node
 
-var fs = require('fs');
-var https = require('https');
+const fs = require('fs');
+const https = require('https');
 const exec = require('child_process').exec;
-var args = process.argv.slice(2);
+const prompt = require('prompt');
+
+const schema = {
+  properties: {
+    url: {
+      required: true
+    },
+    title: {
+      required: true,
+      before: (value) => (
+        value.toLowerCase().endsWith('.mp3') ? value : value + '.mp3'
+      )
+    }
+  }
+};
 
 function makePlaylist(chunk, key) {
   let data = `#EXTM3U
@@ -96,8 +110,6 @@ function main(url, title) {
           data += chunk;
         });
 
-        let name;
-
         resp.on('end', async () => {
           let key = '';
           let chunk = '';
@@ -109,30 +121,35 @@ function main(url, title) {
           let l = chunks.length;
           console.log(`${l} chunks found. Fetching:`);
 
-          let resultName = `${title}.mp3`;
-          let name = resultName;
+          let name;
           let pieces = [];
 
           for (let index = 0; index < l; index++) {
             let [chunk, key] = chunks[index];
 
             name = `chunk${index}.mp3`;
-            await fetchChunk(makePlaylist(chunk, key), name);
+            try {
+              await fetchChunk(makePlaylist(chunk, key), name);
+            } catch (error) {
+              console.log(`Error: "${error}"`);
+            }
             process.stdout.write(`Chunk ${index+1} of ${l} fetched: ` + progress(l, index) + '      \r');
 
             pieces.push(`file '${name}'`);
             if (index % 30 === 0 || index == l - 1) {
-              await concatPieces(pieces, resultName);
-              pieces = [`file '${resultName}'`];
+              await concatPieces(pieces, title);
+              pieces = [`file '${title}'`];
             }
           }
         });
-      }).on('error', (err) => {
-        console.log('Error: ' + err.message);
+      }).on('error', (error) => {
       });
     });
 }
 
-if (args && args.length && args.length == 2) {
-  main(args[0], args[1]);
-}
+prompt.start();
+prompt.get(schema, (error, {url, title}) => {
+  if (error) console.log('Something is wrong...');
+  main(url, title);
+});
+
