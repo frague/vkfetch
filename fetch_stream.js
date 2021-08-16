@@ -3,21 +3,7 @@
 const fs = require('fs');
 const https = require('https');
 const exec = require('child_process').exec;
-const prompt = require('prompt');
-
-const schema = {
-  properties: {
-    url: {
-      required: true
-    },
-    title: {
-      required: true,
-      before: (value) => (
-        value.toLowerCase().endsWith('.mp3') ? value : value + '.mp3'
-      )
-    }
-  }
-};
+const readline = require('readline');
 
 function makePlaylist(chunk, key) {
   let data = `#EXTM3U
@@ -47,26 +33,19 @@ function executeShell(command) {
   });
 }
 
-function fetchChunk(playlist, fileName) {
+async function fetchChunk(playlist, fileName) {
   let name = `chunk.m3u8`;
   fs.writeFileSync(name, playlist);
-  return executeShell(`ffmpeg -protocol_whitelist "crypto,https,file,tls,tcp" -i "${name}" -vn -dn -sn -acodec copy -y "${fileName}"`)
-    .then(() => {
-      fs.unlinkSync(name);
-    })
-    .catch(error => {
-      console.log('Error fetching the chunk:', error);
-    });
+  await executeShell(`ffmpeg -protocol_whitelist "crypto,https,file,tls,tcp" -i "${name}" -vn -dn -sn -acodec copy -y "${fileName}"`);
+  fs.unlinkSync(name);
 }
 
-function concatPieces(pieces, fileName) {
+async function concatPieces(pieces, fileName) {
   fs.writeFileSync('playlist.txt', pieces.join('\n'));
-  return executeShell('ffmpeg -f concat -safe 0 -i "playlist.txt" -c copy -y "temp.mp3"')
-    .then(() => {
-      fs.unlinkSync('playlist.txt');
-      executeShell('rm chunk*.mp3');
-      fs.renameSync('temp.mp3', fileName);
-    });
+  await executeShell('ffmpeg -f concat -safe 0 -i "playlist.txt" -c copy -y "temp.mp3"');
+  fs.unlinkSync('playlist.txt');
+  await executeShell('rm chunk*.mp3');
+  fs.renameSync('temp.mp3', fileName);
 }
 
 function parseChunks(base, source) {
@@ -90,66 +69,77 @@ function parseChunks(base, source) {
     }, []);
 }
 
+const progressSize = 40;
 function progress(total, index) {
-  let size = 40;
-  let percent = total / size;
-  let done = Math.ceil(index / percent);
-  let left = Math.floor((total - index) / percent);
+  const percent = total / progressSize;
+  const done = Math.ceil(index / percent);
+  const left = Math.floor((total - index) / percent);
   return `[${'▓'.repeat(done)}${'░'.repeat(left)}]`;
 }
 
-function main(url, title) {
-  return executeShell('rm playlist*')
-    .catch(error => {})
-    .then(() => {
-      console.log('Fetching the playlist');
-      https.get(url, (resp) => {
-        let data = '';
-
-        resp.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        resp.on('end', async () => {
-          let key = '';
-          let chunk = '';
-
-          let [base, ] = url.split('index.m3u8', 2);
-
-          let chunks = parseChunks(base, data);
-
-          let l = chunks.length;
-          console.log(`${l} chunks found. Fetching:`);
-
-          let name;
-          let pieces = [];
-
-          for (let index = 0; index < l; index++) {
-            let [chunk, key] = chunks[index];
-
-            name = `chunk${index}.mp3`;
-            try {
-              await fetchChunk(makePlaylist(chunk, key), name);
-            } catch (error) {
-              console.log(`Error: "${error}"`);
-            }
-            process.stdout.write(`Chunk ${index+1} of ${l} fetched: ` + progress(l, index) + '      \r');
-
-            pieces.push(`file '${name}'`);
-            if (index % 30 === 0 || index == l - 1) {
-              await concatPieces(pieces, title);
-              pieces = [`file '${title}'`];
-            }
-          }
-        });
-      }).on('error', (error) => {
-      });
-    });
+function fail(becauseOf) {
+  console.log(`Failure: ${becauseOf}`);
+  process.exit(1);
 }
 
-prompt.start();
-prompt.get(schema, (error, {url, title}) => {
-  if (error) console.log('Something is wrong...');
-  main(url, title);
+async function main(url, title) {
+  try {
+    await executeShell('rm playlist*');
+  } catch {};
+
+  console.log('Fetching the playlist');
+  https.get(url, (resp) => {
+    let data = '';
+
+    resp.on('data', (chunk) => {
+      data += chunk;
+    });
+
+    resp.on('end', async () => {
+      const [base, ] = url.split('index.m3u8', 2);
+      const chunks = parseChunks(base, data);
+      const chunksCount = chunks.length;
+      console.log(`${chunksCount} chunks found. Fetching:`);
+
+      let pieces = [];
+
+      // Not a forEach to be executed synchronously
+      for (let index = 0; index < chunksCount; index++) {
+        const [chunk, key] = chunks[index];
+        let name = `chunk${index}.mp3`;
+        try {
+          await fetchChunk(makePlaylist(chunk, key), name);
+        } catch (error) {
+          fail(`Chunk fetching error "${error}"`);
+        }
+        process.stdout.write(`Chunk ${index+1} of ${chunksCount} fetched: ` + progress(chunksCount, index) + '      \r');
+        pieces.push(`file '${name}'`);
+
+        // Concat every 30 chunks together
+        if (index % 30 === 0 || index == chunksCount - 1) {
+          await concatPieces(pieces, title);
+          pieces = [`file '${title}'`];
+        }
+      };
+      console.log(`Completed successfully. Saved to "${title}"`);
+    });
+  }).on('error', (error) => {
+    fail(`Unable to fetch URL supplied`);
+  });
+}
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  prompt: '>'
 });
 
+rl.question('URL of M3U8 stream: ', (url) => {
+  if (!url) fail('Invalid URL');
+
+  rl.question('Tune title: ', (title = 'vk_fetched.mp3') => {
+    if (!title.toLowerCase().endsWith('.mp3')) title += '.mp3';
+    main(url, title);
+    rl.close();
+  });
+});
