@@ -40,9 +40,11 @@ async function fetchChunk(playlist, fileName) {
   fs.unlinkSync(name);
 }
 
-async function concatPieces(pieces, fileName) {
+async function concatPieces(pieces, artist, title) {
+  const fileName = makeFilename(artist, title);
+
   fs.writeFileSync('playlist.txt', pieces.join('\n'));
-  await executeShell('ffmpeg -f concat -safe 0 -i "playlist.txt" -c copy -y "temp.mp3"');
+  await executeShell(`ffmpeg -f concat -safe 0 -i "playlist.txt" -metadata artist="${artist}" -metadata title="${title}" -c copy -y "temp.mp3"`);
   fs.unlinkSync('playlist.txt');
   await executeShell('rm chunk*.mp3');
   fs.renameSync('temp.mp3', fileName);
@@ -82,7 +84,11 @@ function fail(becauseOf) {
   process.exit(1);
 }
 
-async function main(url, title) {
+function makeFilename(artist, title) {
+  return `${artist} - ${title}.mp3`;
+}
+
+async function main(url, artist, title) {
   try {
     await executeShell('rm playlist*');
   } catch {};
@@ -101,6 +107,8 @@ async function main(url, title) {
       const chunksCount = chunks.length;
       console.log(`${chunksCount} chunks found. Fetching:`);
 
+      const fileName = makeFilename(artist, title);
+
       let pieces = [];
 
       // Not a forEach to be executed synchronously
@@ -117,11 +125,11 @@ async function main(url, title) {
 
         // Concat every 30 chunks together
         if (index % 30 === 0 || index == chunksCount - 1) {
-          await concatPieces(pieces, title);
-          pieces = [`file '${title}'`];
+          await concatPieces(pieces, artist, title);
+          pieces = [`file '${fileName}'`];
         }
       };
-      console.log(`Completed successfully. Saved to "${title}"`);
+      console.log(`\nCompleted successfully. Saved to "${fileName}"`);
     });
   }).on('error', (error) => {
     fail(`Unable to fetch URL supplied`);
@@ -137,9 +145,10 @@ const rl = readline.createInterface({
 rl.question('URL of M3U8 stream: ', (url) => {
   if (!url) fail('Invalid URL');
 
-  rl.question('Tune title: ', (title = 'vk_fetched.mp3') => {
-    if (!title.toLowerCase().endsWith('.mp3')) title += '.mp3';
-    main(url, title);
-    rl.close();
+  rl.question(`Artist: `, (artist = '') => {
+    rl.question('Tune title: ', (title = '') => {
+      main(url, artist, title);
+      rl.close();
+    });
   });
 });
