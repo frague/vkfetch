@@ -34,10 +34,14 @@ function executeShell(command) {
 }
 
 async function fetchChunk(playlist, fileName) {
-  let name = `chunk.m3u8`;
-  fs.writeFileSync(name, playlist);
-  await executeShell(`ffmpeg -protocol_whitelist "crypto,https,file,tls,tcp" -i "${name}" -vn -dn -sn -acodec copy -y "${fileName}"`);
-  fs.unlinkSync(name);
+  try {
+    let name = `chunk.m3u8`;
+    fs.writeFileSync(name, playlist);
+    await executeShell(`ffmpeg -allowed_extensions ALL -protocol_whitelist "crypto,https,file,tls,tcp" -i "${name}" -vn -dn -sn -acodec copy -y "${fileName}"`);
+    fs.unlinkSync(name);
+  } catch (error) {
+    console.log(`Error fetching chunk ${fileName}: ${error}`);
+  }
 }
 
 async function concatPieces(pieces, artist, title) {
@@ -60,7 +64,7 @@ function parseChunks(base, source) {
         key = line;
       } else if (line.includes('#EXTINF:')) {
         chunk = `${line}\n`;
-      } else if (line.includes('.ts?')) {
+      } else if (line.endsWith('.ts')) {
         chunk += `${base}${line}`;
         result.push(['' + chunk, '' + key]);
 
@@ -90,10 +94,10 @@ function makeFilename(artist, title) {
 
 async function main(url, artist, title) {
   try {
-    await executeShell('rm playlist*');
+    //await executeShell('rm playlist*');
   } catch {};
 
-  console.log('Fetching the playlist');
+  console.log('Fetching the playlist from', url);
   https.get(url, (resp) => {
     let data = '';
 
